@@ -18,6 +18,9 @@ public class WahaClient {
 
         private static final Logger log = (Logger) LoggerFactory.getLogger(WahaClient.class);
         private static final String SEND_TEXT_PATH = "/api/sendText";
+        private static final long DEFAULT_SEND_INTERVAL_MS = 4000L;
+        private static final Object SEND_LOCK = new Object();
+        private static long lastSendAtMs = 0L;
 
         /**
          * Layout fixo alterado para PUBLIC para ser visível por outros serviços.
@@ -64,6 +67,8 @@ public class WahaClient {
             }
 
             try {
+                throttleGlobal();
+
                 String baseUrl = props.getBaseUrl();
                 String url = baseUrl.replaceAll("/$", "") + SEND_TEXT_PATH;
 
@@ -95,6 +100,24 @@ public class WahaClient {
             } catch (Exception e) {
                 log.error("[WAHA ERROR] Falha ao enviar mensagem para {}: {}", chatId, e.getMessage());
                 return false;
+            }
+        }
+
+        /**
+         * Garante uma fila global de envio com pausa entre mensagens.
+         * Isso evita disparos rápidos (e ajuda a reduzir duplicidade percebida no WhatsApp).
+         */
+        private void throttleGlobal() throws InterruptedException {
+            long intervalo = props.getIntervaloEnvioMs() > 0 ? props.getIntervaloEnvioMs() : DEFAULT_SEND_INTERVAL_MS;
+            if (intervalo < DEFAULT_SEND_INTERVAL_MS) intervalo = DEFAULT_SEND_INTERVAL_MS;
+
+            synchronized (SEND_LOCK) {
+                long now = System.currentTimeMillis();
+                long delta = now - lastSendAtMs;
+                if (lastSendAtMs > 0 && delta < intervalo) {
+                    Thread.sleep(intervalo - delta);
+                }
+                lastSendAtMs = System.currentTimeMillis();
             }
         }
 
